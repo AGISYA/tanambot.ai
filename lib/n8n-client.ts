@@ -33,6 +33,8 @@ export class N8NClient {
       url: this.webhookUrl,
       data: requestData
     })
+    console.log('🚀 Cek token:', this.webhookToken)
+
 
     const response = await fetch(this.webhookUrl, {
       method: 'POST',
@@ -44,7 +46,7 @@ export class N8NClient {
       body: JSON.stringify(requestData)
     })
 
-    console.log('📡 N8N Client - Response status:', response.status)
+    console.log('📡 N8N Client - Response status:', response)
 
     if (!response.ok) {
       const errorText = await response.text()
