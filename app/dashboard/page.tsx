@@ -48,6 +48,7 @@ export default function ChatbotsPage() {
   const [qrCode, setQrCode] = useState<string>('')
   const [qrLoading, setQrLoading] = useState(false)
   const [refreshCountdown, setRefreshCountdown] = useState(10)
+  const [balanceLoading, setBalanceLoading] = useState(false)
 
   useEffect(() => {
     if (user) {
@@ -271,21 +272,73 @@ export default function ChatbotsPage() {
   const fetchBalance = async () => {
     if (!user) return
     
+    setBalanceLoading(true)
     try {
-      const { data, error } = await supabase
+      // 1) Read current balance row (may be stale)
+      let rowBalance = 0
+      let hasRow = false
+      const { data: balanceData, error: balanceError } = await supabase
         .from('balances')
         .select('balance')
         .eq('user_id', user.id)
         .maybeSingle()
-
-      if (error) {
-        console.error('Error fetching balance:', error)
-        return
+      if (balanceError) {
+        console.error('Error fetching balance:', balanceError)
+      } else if (balanceData && typeof balanceData.balance !== 'undefined' && balanceData.balance !== null) {
+        hasRow = true
+        rowBalance = Number(balanceData.balance) || 0
       }
 
-      setBalance(data?.balance || 0)
+      // 2) Compute fresh balance from transactions (authoritative)
+      let computedBalance = rowBalance
+      try {
+        const { data: transactionsData, error: txError } = await supabase
+          .from('transactions')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+
+        if (txError) {
+          console.warn('Error fetching transactions for compute:', txError)
+        } else if (Array.isArray(transactionsData) && transactionsData.length > 0) {
+          computedBalance = transactionsData.reduce((acc: number, t: any) => {
+            const amt = Number(t.amount) || 0
+            return acc + (t.type === 'topup' ? amt : -amt)
+          }, 0)
+        } // else keep rowBalance as computedBalance
+      } catch (e) {
+        console.warn('Failed to compute balance from transactions:', e)
+      }
+
+      // 3) Ensure row exists
+      if (!hasRow) {
+        const { error: createError } = await supabase
+          .from('balances')
+          .insert({ user_id: user.id, balance: computedBalance })
+        if (createError) {
+          console.error('Error creating initial balance row:', createError)
+        }
+      }
+
+      // 4) Persist reconciled balance if differs
+      try {
+        if (!hasRow || rowBalance !== computedBalance) {
+          const { error: upsertError } = await supabase
+            .from('balances')
+            .upsert([{ user_id: user.id, balance: computedBalance }], { onConflict: 'user_id' })
+          if (upsertError) {
+            console.error('Error upserting balance:', upsertError)
+          }
+        }
+      } catch (e) {
+        console.error('Unexpected error upserting balance:', e)
+      }
+
+      setBalance(computedBalance)
     } catch (error) {
       console.error('Error fetching balance:', error)
+    } finally {
+      setBalanceLoading(false)
     }
   }
 
@@ -456,6 +509,7 @@ export default function ChatbotsPage() {
             </Button>
             <Dialog open={isNewBotOpen} onOpenChange={(open) => {
               setIsNewBotOpen(open)
+              if (open) fetchBalance()
               if (!open) resetForm()
             }}>
               <DialogTrigger asChild>
@@ -585,6 +639,7 @@ export default function ChatbotsPage() {
       {/* New Bot Dialog */}
       <Dialog open={isNewBotOpen} onOpenChange={(open) => {
         setIsNewBotOpen(open)
+        if (open) fetchBalance()
         if (!open) resetForm()
       }}>
         <DialogContent className="sm:max-w-md">
