@@ -321,66 +321,53 @@ export default function ChatbotsPage() {
         .maybeSingle();
       if (balanceError) {
         console.error("Error fetching balance:", balanceError);
-      } else if (
+      }
+      {
         balanceData &&
-        typeof balanceData.balance !== "undefined" &&
-        balanceData.balance !== null
-      ) {
-        hasRow = true;
-        rowBalance = Number(balanceData.balance) || 0;
+          typeof balanceData.balance !== "undefined" &&
+          balanceData.balance !== null;
+
+        setBalance(balanceData?.balance);
       }
 
       // 2) Compute fresh balance from transactions (authoritative)
-      let computedBalance = rowBalance;
-      try {
-        const { data: transactionsData, error: txError } = await supabase
-          .from("transactions")
-          .select("*")
-          .eq("user_id", user.id)
-          .order("created_at", { ascending: false });
-
-        if (txError) {
-          console.warn("Error fetching transactions for compute:", txError);
-        } else if (
-          Array.isArray(transactionsData) &&
-          transactionsData.length > 0
-        ) {
-          computedBalance = transactionsData.reduce((acc: number, t: any) => {
-            const amt = Number(t.amount) || 0;
-            return acc + (t.type === "topup" ? amt : -amt);
-          }, 0);
-        } // else keep rowBalance as computedBalance
-      } catch (e) {
-        console.warn("Failed to compute balance from transactions:", e);
-      }
+      // let computedBalance = rowBalance;
+      // try {
+      //   // Gunakan fungsi rekonsiliasi pusat agar konsisten dengan tabel balances
+      //   computedBalance = await reconcileAndGetBalance(supabase, user.id);
+      // } catch (e) {
+      //   console.warn("Failed to reconcile balance:", e);
+      // }
 
       // 3) Ensure row exists
-      if (!hasRow) {
-        const { error: createError } = await supabase
-          .from("balances")
-          .insert({ user_id: user.id, balance: computedBalance });
-        if (createError) {
-          console.error("Error creating initial balance row:", createError);
-        }
-      }
+      // if (!hasRow) {
+      //   const { error: createError } = await supabase
+      //     .from("balances")
+      //     .insert({ user_id: user.id, balance: balanceData?.balance });
+      //   if (createError) {
+      //     console.error("Error creating initial balance row:", createError);
+      //   }
+      // }
 
       // 4) Persist reconciled balance if differs
-      try {
-        if (!hasRow || rowBalance !== computedBalance) {
-          const { error: upsertError } = await supabase
-            .from("balances")
-            .upsert([{ user_id: user.id, balance: computedBalance }], {
-              onConflict: "user_id",
-            });
-          if (upsertError) {
-            console.error("Error upserting balance:", upsertError);
-          }
-        }
-      } catch (e) {
-        console.error("Unexpected error upserting balance:", e);
-      }
+      // try {
+      //   if (!hasRow || rowBalance !== computedBalance) {
+      //     const { error: upsertError } = await supabase
+      //       .from("balances")
+      //       .upsert([{ user_id: user.id, balance: computedBalance }], {
+      //         onConflict: "user_id",
+      //       });
+      //     if (upsertError) {
+      //       console.error("Error upserting balance:", upsertError);
+      //     }
+      //   }
+      // } catch (e) {
+      //   console.error("Unexpected error upserting balance:", e);
+      // }
 
-      setBalance(computedBalance);
+      // if (!creating) {
+      //   setBalance(computedBalance);
+      // }
     } catch (error) {
       console.error("Error fetching balance:", error);
     } finally {
@@ -399,10 +386,28 @@ export default function ChatbotsPage() {
   };
 
   const handleCreateBot = async () => {
+    console.log("check handle create");
     if (!botName.trim() || !selectedPlan || !user) return;
 
     setCreating(true);
+    const prevBalance = balance;
     try {
+      // Cek apakah bot dengan nama yang sama sudah ada untuk mencegah duplikasi
+      const { data: existingBots, error: checkError } = await supabase
+        .from("chatbot")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("name", botName.trim())
+        .limit(1);
+
+      if (checkError) {
+        console.error("Error checking existing bots:", checkError);
+      } else if (existingBots && existingBots.length > 0) {
+        throw new Error(
+          `Bot dengan nama "${botName}" sudah ada. Gunakan nama lain.`
+        );
+      }
+
       // Get auth token from session
       const {
         data: { session },
@@ -450,6 +455,110 @@ export default function ChatbotsPage() {
 
         // Refresh chatbots list
         fetchChatbots();
+
+        // Post-create balance reconciliation to ensure correct deduction
+        try {
+          const plan = getSelectedPlanData();
+          if (plan) {
+            const price = Number(plan.price_per_month) || 0;
+
+            // Compute fresh balance from transactions
+            let computedBalance = prevBalance;
+            const { data: transactionsData, error: txError } = await supabase
+              .from("transactions")
+              .select("*")
+              .eq("user_id", user.id)
+              .order("created_at", { ascending: false });
+
+            if (!txError && Array.isArray(transactionsData)) {
+              computedBalance = transactionsData.reduce(
+                (acc: number, t: any) => {
+                  const amt = Number(t.amount) || 0;
+                  return acc + (t.type === "topup" ? amt : -amt);
+                },
+                0
+              );
+            } else if (txError) {
+              console.warn(
+                "Gagal mengambil transaksi untuk rekonsiliasi:",
+                txError
+              );
+            }
+
+            const delta = computedBalance - prevBalance;
+            // Hanya lakukan rekonsiliasi jika saldo bertambah sebesar harga paket (kesalahan: dicatat sebagai topup)
+            // Jangan lakukan rekonsiliasi jika delta === 0 karena mungkin webhook sudah membuat transaksi yang benar
+            if (price > 0 && delta === price) {
+              console.log(
+                "Reconciling post-create charge. prev=",
+                prevBalance,
+                "now=",
+                computedBalance,
+                "price=",
+                price
+              );
+
+              // Cek apakah sudah ada transaksi usage untuk pembuatan bot ini untuk mencegah duplikasi
+              const planData = getSelectedPlanData();
+              const botCreationDesc = `Create Bot ${botName} - Plan ${
+                planData?.name || "Unknown"
+              }`;
+              const { data: existingTx, error: txCheckError } = await supabase
+                .from("transactions")
+                .select("id")
+                .eq("user_id", user.id)
+                .eq("type", "usage")
+                .eq("amount", price)
+                .ilike("description", `%${botName}%`)
+                .order("created_at", { ascending: false })
+                .limit(1);
+
+              if (txCheckError) {
+                console.warn(
+                  "Error checking existing transactions:",
+                  txCheckError
+                );
+              }
+
+              // Hanya buat transaksi usage jika belum ada
+              if (!existingTx || existingTx.length === 0) {
+                const { error: insertErr } = await supabase
+                  .from("transactions")
+                  .insert({
+                    user_id: user.id,
+                    type: "usage",
+                    amount: price,
+                    description: botCreationDesc,
+                  });
+                if (insertErr) {
+                  console.error(
+                    "Gagal menyisipkan transaksi usage untuk pembuatan:",
+                    insertErr
+                  );
+                } else {
+                  // Upsert saldo hasil rekonsiliasi agar konsisten antar halaman
+                  const newBalance = computedBalance - price;
+                  const { error: upsertErr } = await supabase
+                    .from("balances")
+                    .upsert([{ user_id: user.id, balance: newBalance }], {
+                      onConflict: "user_id",
+                    });
+                  if (upsertErr) {
+                    console.error(
+                      "Gagal upsert saldo setelah rekonsiliasi:",
+                      upsertErr
+                    );
+                  }
+                }
+              }
+            }
+          }
+        } catch (reconErr) {
+          console.warn("Post-create charge reconciliation failed:", reconErr);
+        }
+
+        // Refresh balance state for UI consistency
+        fetchBalance();
       } else {
         // Failed
         const errorText = await response.text();
@@ -467,6 +576,8 @@ export default function ChatbotsPage() {
       });
     } finally {
       setCreating(false);
+      // Now refresh balance after creation completes to avoid temporary inconsistencies
+      fetchBalance();
     }
   };
 

@@ -24,6 +24,7 @@ import {
 import { formatDistanceToNow } from "date-fns";
 import { id } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
+// import { reconcileAndGetBalance } from "@/lib/utils";
 
 interface Balance {
   balance: number;
@@ -68,36 +69,23 @@ export default function BalancePage() {
   const fetchUserData = async () => {
     if (!user) return;
 
+    setLoading(true);
     try {
-      let nextBalance: number | null = null;
-      let hadBalanceRecord = false;
-      // Fetch balance
-      const { data: balanceData, error: balanceError } = await supabase
+      // Gunakan reconcileAndGetBalance untuk konsistensi saldo
+      // const reconciled = await reconcileAndGetBalance(supabase, user.id);
+      // setBalance(reconciled);
+
+      // console.warn("Error fetching transactions for reconcile:", txError);
+      // Fallback ke balance row jika gagal ambil transaksi
+      const { data: balanceData } = await supabase
         .from("balances")
         .select("balance")
         .eq("user_id", user.id)
         .maybeSingle();
 
-      if (balanceError) {
-        console.error("Error fetching balance:", balanceError);
-        nextBalance = 0;
-      } else if (balanceData) {
-        hadBalanceRecord = true;
-        nextBalance = balanceData.balance;
-      } else {
-        // No balance record found, create one
-        console.warn("No balance record found for user:", user.id);
-        const { error: createError } = await supabase
-          .from("balances")
-          .insert({ user_id: user.id, balance: 0 });
+      setBalance(balanceData?.balance || 0);
 
-        if (createError) {
-          console.error("Error creating balance:", createError);
-        }
-        nextBalance = 0;
-      }
-
-      // Fetch transactions
+      // Ambil data transaksi untuk ditampilkan di tabel
       const { data: transactionsData, error: transactionsError } =
         await supabase
           .from("transactions")
@@ -107,28 +95,11 @@ export default function BalancePage() {
 
       if (transactionsError) {
         console.error("Error fetching transactions:", transactionsError);
-        setTransactions([]);
-      } else if (transactionsData) {
-        setTransactions(transactionsData);
-        // Only compute balance from transactions when there is no balance record
-        if (!hadBalanceRecord) {
-          try {
-            const computed = transactionsData.reduce((acc: number, t: any) => {
-              const amt = Number(t.amount) || 0;
-              return acc + (t.type === "topup" ? amt : -amt);
-            }, 0);
-            if (!Number.isNaN(computed)) {
-              nextBalance = computed;
-            }
-          } catch (e) {
-            console.warn("Failed to compute balance from transactions:", e);
-          }
-        }
       } else {
-        setTransactions([]);
+        setTransactions(transactionsData || []);
       }
 
-      // Fetch payments
+      // Ambil data payments untuk ditampilkan di tabel
       const { data: paymentsData, error: paymentsError } = await supabase
         .from("payments")
         .select("*")
@@ -137,29 +108,8 @@ export default function BalancePage() {
 
       if (paymentsError) {
         console.error("Error fetching payments:", paymentsError);
-        setPayments([]);
-      } else if (paymentsData) {
-        setPayments(paymentsData);
       } else {
-        setPayments([]);
-      }
-
-      // Apply balance state once to avoid flicker
-      if (nextBalance !== null) {
-        // Persist the computed balance so other pages read the same value
-        try {
-          const { error: upsertError } = await supabase
-            .from("balances")
-            .upsert([{ user_id: user.id, balance: nextBalance }], {
-              onConflict: "user_id",
-            });
-          if (upsertError) {
-            console.error("Error upserting balance:", upsertError);
-          }
-        } catch (e) {
-          console.error("Unexpected error upserting balance:", e);
-        }
-        setBalance(nextBalance);
+        setPayments(paymentsData || []);
       }
     } catch (error) {
       console.error("Error fetching user data:", error);
