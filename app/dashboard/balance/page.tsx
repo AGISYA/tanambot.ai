@@ -359,11 +359,6 @@ export default function BalancePage() {
   return (
     <div className="p-4 lg:p-6">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">Saldo</h1>
-        <p className="text-gray-600">
-          Kelola saldo dan lihat riwayat transaksi Anda
-        </p>
-
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end space-y-2 sm:space-y-0 sm:space-x-3 mt-4">
           <Button variant="outline" size="sm">
             <RefreshCw className="h-4 w-4 mr-2" />
@@ -371,11 +366,7 @@ export default function BalancePage() {
           </Button>
 
           <Dialog open={isTopupOpen} onOpenChange={setIsTopupOpen}>
-            <DialogTrigger asChild>
-              <Button className="bg-blue-600 hover:bg-blue-700">
-                <Plus className="h-4 w-4 mr-2" />
-                Tambah Saldo
-              </Button>
+            
             </DialogTrigger>
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
