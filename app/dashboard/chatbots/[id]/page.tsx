@@ -943,9 +943,11 @@ export default function ChatbotManagePage() {
                       </ul>
                     </div>
 
-                    <Button variant="outline" className="w-full">
-                      Upgrade Paket
-                    </Button>
+                    <Link href={`/dashboard/plans?chatbotId=${chatbot.id}`}>
+                      <Button variant="outline" className="w-full">
+                        Upgrade Paket
+                      </Button>
+                    </Link>
 
                     <Dialog
                       open={renewDialogOpen}
