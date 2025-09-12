@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase, Database } from "@/lib/supabase";
-import { reconcileAndGetBalance } from "@/lib/utils";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -109,8 +108,12 @@ export default function ChatbotManagePage() {
     if (!user) return;
 
     try {
-      const reconciled = await reconcileAndGetBalance(supabase, user.id);
-      setBalance(reconciled);
+      const { data: balanceData } = await supabase
+        .from("balances")
+        .select("balance")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      setBalance(balanceData?.balance || 0);
     } catch (error) {
       console.error("Error reconciling balance:", error);
       // Fallback ke balance row jika gagal rekonsiliasi
