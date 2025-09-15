@@ -167,17 +167,20 @@ export default function PlansPage() {
         typeof chatbot.ai_quota === "number" ? chatbot.ai_quota : 0;
 
       // Call n8n webhook for renewal
-      const response = await fetch("https://n8n.tanam.io/webhook/bot/renew", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          id: chatbot.id,
-          planId: selectedPlan.id,
-        }),
-      });
+      const response = await fetch(
+        "https://n8n.tanam.io/webhook/bot/upgrade-packages",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            id: chatbot.id,
+            planId: selectedPlan.id,
+          }),
+        }
+      );
 
       toast({
         variant: "success",
