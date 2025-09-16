@@ -28,8 +28,20 @@ import {
   Wallet,
   QrCode,
   X,
+  Trash2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 type ChatbotWithPlan = Database["public"]["Tables"]["chatbot"]["Row"] & {
   plans: Database["public"]["Tables"]["plans"]["Row"];
@@ -56,6 +68,7 @@ export default function ChatbotsPage() {
   const [qrLoading, setQrLoading] = useState(false);
   const [refreshCountdown, setRefreshCountdown] = useState(10);
   const [balanceLoading, setBalanceLoading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -564,7 +577,7 @@ export default function ChatbotsPage() {
         const errorText = await response.text();
         console.error("Failed to create bot:", errorText);
         throw new Error(
-          `Failed to create bot: ${response.status} ${response.statusText}`
+          `Failed to create bot: ${response.status} ${errorText}`
         );
       }
     } catch (error) {
@@ -578,6 +591,37 @@ export default function ChatbotsPage() {
       setCreating(false);
       // Now refresh balance after creation completes to avoid temporary inconsistencies
       fetchBalance();
+    }
+  };
+
+  const handleDeleteBot = async (id: string) => {
+    if (!user) return;
+    setDeletingId(id);
+    try {
+      const { error } = await supabase
+        .from("chatbot")
+        .delete()
+        .eq("id", id)
+        .eq("user_id", user.id);
+      if (error) throw error;
+
+      setChatbots((prev) => prev.filter((b) => b.id !== id));
+      toast({
+        variant: "success",
+        title: "Berhasil",
+        description: "Chatbot berhasil dihapus.",
+      });
+    } catch (error) {
+      console.error("Error deleting chatbot:", error);
+      toast({
+        variant: "destructive",
+        title: "Gagal menghapus",
+        description:
+          (error as Error).message ||
+          "Terjadi kesalahan saat menghapus chatbot.",
+      });
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -841,16 +885,47 @@ export default function ChatbotsPage() {
                         </div>
                       </td>
                       <td className="py-4 px-3 lg:px-6">
-                        <Link href={`/dashboard/chatbots/${chatbot.id}`}>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="w-full sm:w-auto"
-                          >
-                            Kelola
-                          </Button>
-                        </Link>
-                      </td>
+                        <div className="flex items-center gap-2">
+                          <Link href={`/dashboard/chatbots/${chatbot.id}`}>
+                            <Button size="sm" variant="outline" className="w-full sm:w-auto">
+                              Kelola
+                            </Button>
+                          </Link>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                className="w-full sm:w-auto"
+                                disabled={deletingId === chatbot.id}
+                              >
+                                <Trash2 className="h-4 w-4 mr-1.5" />
+                                {deletingId === chatbot.id
+                                  ? "Menghapus..."
+                                  : "Hapus"}
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Hapus Chatbot?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Tindakan ini tidak dapat dibatalkan. Ini akan menghapus chatbot
+                                  {chatbot.name || "Bot Tanpa Nama"} secara permanen dari akun Anda.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Batal</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => handleDeleteBot(chatbot.id)}
+                                  disabled={deletingId === chatbot.id}
+                                >
+                                  Ya, hapus
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                       </td>
                     </tr>
                   ))
                 )}
@@ -885,58 +960,65 @@ export default function ChatbotsPage() {
           if (!open) resetForm();
         }}
       >
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="w-[95vw] sm:max-w-3xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Buat Chatbot Baru</DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-6">
-            {/* Bot Name */}
-            <div className="space-y-2">
-              <Label htmlFor="botName">Nama Bot</Label>
-              <Input
-                id="botName"
-                value={botName}
-                onChange={(e) => setBotName(e.target.value)}
-                placeholder="Masukkan nama bot..."
-                className="w-full"
-              />
-            </div>
+          <div className="grid gap-6 sm:grid-cols-2">
+            {/* Left: Form */}
+            <div className="space-y-6">
+              {/* Bot Name */}
+              <div className="space-y-2">
+                <Label htmlFor="botName">Nama Bot</Label>
+                <Input
+                  id="botName"
+                  value={botName}
+                  onChange={(e) => setBotName(e.target.value)}
+                  placeholder="Masukkan nama bot..."
+                  className="w-full"
+                />
+              </div>
 
-            {/* Plan Selection */}
-            <div className="space-y-3">
-              <Label>Pilih Paket</Label>
-              <RadioGroup value={selectedPlan} onValueChange={setSelectedPlan}>
-                {plans.map((plan) => (
-                  <div
-                    key={plan.id}
-                    className="flex items-start space-x-3 p-3 border rounded-lg hover:bg-gray-50"
-                  >
-                    <RadioGroupItem value={plan.id} id={plan.id} />
-                    <div className="flex-1">
-                      <div className="flex flex-col space-y-1 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
-                        <Label
-                          htmlFor={plan.id}
-                          className="font-medium cursor-pointer"
-                        >
-                          {plan.name}
-                        </Label>
-                        <span className="font-semibold text-blue-600">
-                          {formatCurrency(plan.price_per_month)}
-                        </span>
-                      </div>
-                      {plan.description && (
-                        <p className="text-sm text-gray-500 mt-1">
-                          {plan.description}
-                        </p>
-                      )}
-                      <div className="text-xs text-gray-400 mt-1">
-                        {plan.ai_quota.toLocaleString()} AI tokens/month
+              {/* Plan Selection */}
+              <div className="space-y-3">
+                <Label>Pilih Paket</Label>
+                <RadioGroup value={selectedPlan} onValueChange={setSelectedPlan}>
+                  {plans.map((plan) => (
+                    <div
+                      key={plan.id}
+                      className="flex items-start space-x-3 p-3 border rounded-lg hover:bg-gray-50"
+                    >
+                      <RadioGroupItem value={plan.id} id={plan.id} />
+                      <div className="flex-1">
+                        <div className="flex flex-col space-y-1 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
+                          <Label
+                            htmlFor={plan.id}
+                            className="font-medium cursor-pointer"
+                          >
+                            {plan.name}
+                          </Label>
+                          <span className="font-semibold text-blue-600">
+                            {formatCurrency(plan.price_per_month)}
+                          </span>
+                        </div>
+                        {plan.description && (
+                          <p className="text-sm text-gray-500 mt-1">
+                            {plan.description}
+                          </p>
+                        )}
+                        <div className="text-xs text-gray-400 mt-1">
+                          {plan.ai_quota.toLocaleString()} AI tokens/month
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </RadioGroup>
+                  ))}
+                </RadioGroup>
+              </div>
+            </div>
+
+            {/* Right: Summary + Actions */}
+            <div className="space-y-4">
               {/* Balance Check */}
               <div className="space-y-3">
                 <div className="flex flex-col space-y-2 sm:flex-row sm:items-center sm:justify-between sm:space-y-0 p-3 bg-gray-50 rounded-lg">
@@ -995,28 +1077,29 @@ export default function ChatbotsPage() {
                   </Alert>
                 )}
               </div>
-            </div>
-            {/* Action Buttons */}
-            <div className="flex flex-col space-y-3 sm:flex-row sm:space-y-0 sm:space-x-3 pt-4">
-              <Button
-                variant="outline"
-                onClick={() => setIsNewBotOpen(false)}
-                className="flex-1"
-              >
-                Batal
-              </Button>
-              <Button
-                onClick={handleCreateBot}
-                disabled={
-                  !botName.trim() ||
-                  !selectedPlan ||
-                  !isBalanceSufficient() ||
-                  creating
-                }
-                className="flex-1 bg-blue-600 hover:bg-blue-700"
-              >
-                {creating ? "Membuat..." : "Buat Bot"}
-              </Button>
+
+              {/* Action Buttons */}
+              <div className="flex flex-col space-y-3 sm:flex-row sm:space-y-0 sm:space-x-3 pt-1">
+                <Button
+                  variant="outline"
+                  onClick={() => setIsNewBotOpen(false)}
+                  className="flex-1"
+                >
+                  Batal
+                </Button>
+                <Button
+                  onClick={handleCreateBot}
+                  disabled={
+                    !botName.trim() ||
+                    !selectedPlan ||
+                    !isBalanceSufficient() ||
+                    creating
+                  }
+                  className="flex-1 bg-blue-600 hover:bg-blue-700"
+                >
+                  {creating ? "Membuat..." : "Buat Bot"}
+                </Button>
+              </div>
             </div>
           </div>
         </DialogContent>
